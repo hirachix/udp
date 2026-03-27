@@ -1,4 +1,4 @@
-name: RDP
+name: hirakoo
 
 on:
   workflow_dispatch:
@@ -29,68 +29,33 @@ jobs:
           # (Optional) Restart the Remote Desktop service to ensure changes take effect
           Restart-Service -Name TermService -Force
 
-      - name: Create RDP User with Custom Username and Password
+      - name: Create RDP User with Secure Password
         run: |
-          # Set custom username and password
-          $username = "hirako"
-          $password = "hirako90"
-          
-          # Check if user already exists, if so remove them first
-          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Write-Host "User $username exists, attempting to remove..."
-              try {
-                  Remove-LocalUser -Name $username -Force -ErrorAction Stop
-                  Write-Host "User $username removed successfully"
-                  # Wait a moment for system to process removal
-                  Start-Sleep -Seconds 2
-              }
-              catch {
-                  Write-Warning "Could not remove user: $_"
-                  # Alternative: Disable and rename instead of removing
-                  Disable-LocalUser -Name $username
-                  $newUsername = "$username-old-$(Get-Date -Format 'yyyyMMddHHmmss')"
-                  Rename-LocalUser -Name $username -NewName $newUsername
-                  Write-Host "User renamed to $newUsername"
-              }
+          Add-Type -AssemblyName System.Security
+          $charSet = @{
+              Upper   = [char[]](65..90)      # A-Z
+              Lower   = [char[]](97..122)     # a-z
+              Number  = [char[]](48..57)      # 0-9
+              Special = ([char[]](33..47) + [char[]](58..64) +
+                         [char[]](91..96) + [char[]](123..126)) # Special characters
           }
-          
-          # Create secure password
+          $rawPassword = @()
+          $rawPassword += $charSet.Upper | Get-Random -Count 4
+          $rawPassword += $charSet.Lower | Get-Random -Count 4
+          $rawPassword += $charSet.Number | Get-Random -Count 4
+          $rawPassword += $charSet.Special | Get-Random -Count 4
+          $password = -join ($rawPassword | Sort-Object { Get-Random })
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
+          New-LocalUser -Name "Hirako" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
           
-          # Create local user with additional error handling
-          try {
-              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires -ErrorAction Stop
-              Write-Host "User $username created successfully"
-          }
-          catch {
-              Write-Error "Failed to create user: $_"
-              # Alternative: try with a different username if hirako is problematic
-              $username = "rdpuser"
-              Write-Host "Trying alternative username: $username"
-              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
-          }
+          echo "RDP_CREDS=User: Hirako | Password: $password" >> $env:GITHUB_ENV
           
-          # Add user to groups with error handling
-          try {
-              Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction Stop
-              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction Stop
-              Write-Host "User added to required groups"
-          }
-          catch {
-              Write-Warning "Group membership error: $_"
-          }
-          
-          # Store credentials for display
-          echo "RDP_CREDS=User: $username | Password: $password" >> $env:GITHUB_ENV
-          
-          # Verify user was created
-          $userCheck = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
-          if (-not $userCheck) {
-              Write-Error "User creation verification failed"
+          if (-not (Get-LocalUser -Name "RDP")) {
+              Write-Error "User creation failed"
               exit 1
           }
-          
-          Write-Host "User verification successful: $($userCheck.Name)"
 
       - name: Install Tailscale
         run: |
@@ -137,8 +102,8 @@ jobs:
         run: |
           Write-Host "`n=== RDP ACCESS ==="
           Write-Host "Address: $env:TAILSCALE_IP"
-          Write-Host "Username: hirako"
-          Write-Host "Password: hirako90"
+          Write-Host "Username: Hirako"
+          Write-Host "Password: $(echo $env:RDP_CREDS)"
           Write-Host "==================`n"
           
           # Keep runner active indefinitely (or until manually cancelled)
