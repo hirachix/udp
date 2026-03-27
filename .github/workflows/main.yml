@@ -37,27 +37,60 @@ jobs:
           
           # Check if user already exists, if so remove them first
           if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
-              Remove-LocalUser -Name $username -Force
+              Write-Host "User $username exists, attempting to remove..."
+              try {
+                  Remove-LocalUser -Name $username -Force -ErrorAction Stop
+                  Write-Host "User $username removed successfully"
+                  # Wait a moment for system to process removal
+                  Start-Sleep -Seconds 2
+              }
+              catch {
+                  Write-Warning "Could not remove user: $_"
+                  # Alternative: Disable and rename instead of removing
+                  Disable-LocalUser -Name $username
+                  $newUsername = "$username-old-$(Get-Date -Format 'yyyyMMddHHmmss')"
+                  Rename-LocalUser -Name $username -NewName $newUsername
+                  Write-Host "User renamed to $newUsername"
+              }
           }
           
           # Create secure password
           $securePass = ConvertTo-SecureString $password -AsPlainText -Force
           
-          # Create local user
-          New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          # Create local user with additional error handling
+          try {
+              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires -ErrorAction Stop
+              Write-Host "User $username created successfully"
+          }
+          catch {
+              Write-Error "Failed to create user: $_"
+              # Alternative: try with a different username if hirako is problematic
+              $username = "rdpuser"
+              Write-Host "Trying alternative username: $username"
+              New-LocalUser -Name $username -Password $securePass -AccountNeverExpires -PasswordNeverExpires
+          }
           
-          # Add user to groups
-          Add-LocalGroupMember -Group "Administrators" -Member $username
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username
+          # Add user to groups with error handling
+          try {
+              Add-LocalGroupMember -Group "Administrators" -Member $username -ErrorAction Stop
+              Add-LocalGroupMember -Group "Remote Desktop Users" -Member $username -ErrorAction Stop
+              Write-Host "User added to required groups"
+          }
+          catch {
+              Write-Warning "Group membership error: $_"
+          }
           
           # Store credentials for display
           echo "RDP_CREDS=User: $username | Password: $password" >> $env:GITHUB_ENV
           
           # Verify user was created
-          if (-not (Get-LocalUser -Name $username)) {
-              Write-Error "User creation failed"
+          $userCheck = Get-LocalUser -Name $username -ErrorAction SilentlyContinue
+          if (-not $userCheck) {
+              Write-Error "User creation verification failed"
               exit 1
           }
+          
+          Write-Host "User verification successful: $($userCheck.Name)"
 
       - name: Install Tailscale
         run: |
